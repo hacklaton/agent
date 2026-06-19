@@ -24,6 +24,18 @@ from mcp_server.tools.plan_generator import generate_course_plan
 from mcp_server.tools.topic_suggester import suggest_weekly_topics
 from mcp_server.tools.db_writer import save_plan_to_db, get_teacher_selections
 from mcp_server.tools.plan_finalizer import finalize_course_plan
+from mcp_server.tools.biometric_analytics import (
+    run_clustering,
+    get_dashboard_correlation,
+    flag_borderline_cases,
+    publish_risk_alert,
+)
+from mcp_server.tools.face_verifier import (
+    register_face,
+    verify_face,
+    get_monthly_attendance_summary,
+    get_user_attendance_history,
+)
 from mcp_server.resources.course_context import get_course_context
 
 logger = structlog.get_logger(__name__)
@@ -143,6 +155,146 @@ def tool_finalize_course_plan(course_id: str) -> dict:
     """
     logger.info("mcp.tool.finalize_course_plan", course_id=course_id)
     return finalize_course_plan(course_id)
+
+
+# ============================================================
+# BIOMETRIC ANALYTICS TOOLS (FiftyOne Integration)
+# ============================================================
+
+@mcp.tool()
+def tool_run_clustering(
+    dataset_name: str,
+    fields: list[str],
+    n_clusters: int = 4,
+) -> dict:
+    """
+    Agrupa a los estudiantes en clusters de riesgo escolar basados en
+    su índice de asistencia y rendimiento promedio, usando algoritmos de
+    FiftyOne/Clustering.
+
+    Parámetros:
+    - dataset_name: Nombre del dataset activo.
+    - fields: Lista de campos métricos a correlacionar.
+    - n_clusters: Cantidad de grupos (por defecto 4).
+    """
+    logger.info("mcp.tool.run_clustering", dataset_name=dataset_name, fields=fields)
+    return run_clustering(dataset_name, fields, n_clusters)
+
+
+@mcp.tool()
+def tool_get_dashboard_correlation(dataset_name: str) -> dict:
+    """
+    Genera y abre una sesión web interactiva de visualización en el dashboard
+    de FiftyOne para analizar las correlaciones entre asistencia y calificaciones.
+
+    Parámetros:
+    - dataset_name: Nombre del dataset de FiftyOne.
+    """
+    logger.info("mcp.tool.get_dashboard_correlation", dataset_name=dataset_name)
+    return get_dashboard_correlation(dataset_name)
+
+
+@mcp.tool()
+def tool_flag_borderline_cases(threshold: float = 0.75) -> dict:
+    """
+    Usa técnicas de Active Learning para identificar y etiquetar alumnos
+    con comportamiento académico en el límite del riesgo (casos borderline).
+
+    Parámetros:
+    - threshold: Umbral del puntaje de riesgo de deserción (default 0.75).
+    """
+    logger.info("mcp.tool.flag_borderline_cases", threshold=threshold)
+    return flag_borderline_cases(threshold)
+
+
+@mcp.tool()
+def tool_publish_risk_alert(student_id: str, evidence: dict) -> dict:
+    """
+    Publica una alerta temprana de riesgo de deserción al Message Broker de la app
+    para ser procesada por otros agentes notificadores.
+
+    Parámetros:
+    - student_id: Identificación del estudiante en riesgo.
+    - evidence: Objeto con las métricas y evidencias correspondientes (ej: attendance_rate).
+    """
+    logger.info("mcp.tool.publish_risk_alert", student_id=student_id)
+    return publish_risk_alert(student_id, evidence)
+
+
+# ============================================================
+# FACE VERIFICATION TOOLS (Biometric Attendance)
+# ============================================================
+
+@mcp.tool()
+def tool_register_face(user_id: str, image_base64: str) -> dict:
+    """
+    Registra o actualiza la foto biométrica de referencia de un usuario.
+
+    Emula el operador FiftyOne 'register_face_embedding': almacena la imagen
+    como plantilla de referencia para verificaciones futuras en PostgreSQL.
+
+    Parámetros:
+    - user_id: UUID del usuario en la base de datos
+    - image_base64: Imagen JPEG/PNG codificada en Base64 del rostro
+    """
+    logger.info("mcp.tool.register_face", user_id=user_id)
+    return register_face(user_id, image_base64)
+
+
+@mcp.tool()
+def tool_verify_face(image_base64: str, user_id: str = "") -> dict:
+    """
+    Verifica un rostro capturado contra los datos biométricos registrados.
+
+    Emula el operador FiftyOne 'compute_similarity' + 'sort_by_similarity':
+    realiza comparación pixel-a-pixel con cosine similarity para identificar
+    al usuario o rechazar si no coincide.
+
+    Modos:
+    - Autenticado (user_id provisto): compara contra el rostro de ese usuario.
+      Retorna MATCH si similitud >= umbral, MISMATCH si no coincide.
+    - Invitado (sin user_id): compara contra TODOS los usuarios registrados.
+      Retorna el mejor match o UNKNOWN si ninguno supera el umbral.
+
+    Parámetros:
+    - image_base64: Imagen Base64 del rostro a verificar
+    - user_id: (opcional) UUID del usuario específico a comparar
+    """
+    logger.info("mcp.tool.verify_face", user_id=user_id or "guest")
+    return verify_face(image_base64, user_id if user_id else None)
+
+
+@mcp.tool()
+def tool_get_monthly_attendance_summary(year: int, month: int) -> dict:
+    """
+    Obtiene el resumen estadístico de asistencia de un mes completo.
+
+    Usado por el agente para correlacionar tasas de asistencia con riesgo
+    de deserción a través del análisis de clustering de FiftyOne.
+
+    Parámetros:
+    - year: Año calendario (ej: 2025)
+    - month: Mes 1-12
+    """
+    logger.info("mcp.tool.get_monthly_attendance_summary", year=year, month=month)
+    return get_monthly_attendance_summary(year, month)
+
+
+@mcp.tool()
+def tool_get_user_attendance_history(user_id: str, year: int, month: int) -> dict:
+    """
+    Obtiene el historial de asistencia mensual de un usuario específico.
+
+    Permite al agente analizar patrones individuales de un estudiante
+    en riesgo y correlacionarlos con su rendimiento académico.
+
+    Parámetros:
+    - user_id: UUID del estudiante o profesor
+    - year: Año calendario
+    - month: Mes 1-12
+    """
+    logger.info("mcp.tool.get_user_attendance_history", user_id=user_id, year=year, month=month)
+    return get_user_attendance_history(user_id, year, month)
 
 
 # ============================================================

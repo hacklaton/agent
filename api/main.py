@@ -328,6 +328,49 @@ async def generate_workflow(request: GenerateWorkflowRequest):
 
 
 # ============================================================
+# BIOMETRIC / PREDICTIVE ANALYTICS ENDPOINTS
+# ============================================================
+
+@app.get(
+    "/analytics/clusters",
+    summary="Obtiene la agrupación (clustering) de alumnos según riesgo",
+)
+async def get_clusters(dataset_name: str = "students", n_clusters: int = 4):
+    from mcp_server.tools.biometric_analytics import run_clustering
+    logger.info("api.get_clusters.request", dataset_name=dataset_name, n_clusters=n_clusters)
+    result = await run_clustering(dataset_name=dataset_name, fields=["attendance_rate", "avg_grade"], n_clusters=n_clusters)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+
+@app.get(
+    "/analytics/grey-zone",
+    summary="Obtiene los alumnos en la zona gris (anómalos / borderline)",
+)
+async def get_grey_zone(threshold: float = 0.75):
+    from mcp_server.tools.biometric_analytics import flag_borderline_cases
+    logger.info("api.get_grey_zone.request", threshold=threshold)
+    result = await flag_borderline_cases(threshold=threshold)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+
+@app.get(
+    "/analytics/correlation",
+    summary="Obtiene la correlación y URL del dashboard interactivo de FiftyOne",
+)
+async def get_correlation(dataset_name: str = "students"):
+    from mcp_server.tools.biometric_analytics import get_dashboard_correlation
+    logger.info("api.get_correlation.request", dataset_name=dataset_name)
+    result = await get_dashboard_correlation(dataset_name=dataset_name)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+
+# ============================================================
 # Entry point
 # ============================================================
 

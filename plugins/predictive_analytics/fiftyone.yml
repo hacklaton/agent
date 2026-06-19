@@ -1,0 +1,9 @@
+name: "@org/predictive_analytics"
+label: "Predictive Analytics Plugin"
+description: "Plugin containing operators for clustering, correlation dashboard, borderline cases and risk alerts."
+version: "1.0.0"
+operators:
+  - run_clustering
+  - get_dashboard_correlation
+  - flag_borderline_cases
+  - publish_risk_alert
