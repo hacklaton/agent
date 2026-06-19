@@ -99,6 +99,15 @@ class SuggestTopicsRequest(BaseModel):
     level: Literal["BEGINNER", "INTERMEDIATE", "ADVANCED"] = "BEGINNER"
 
 
+class GenerateWorkflowRequest(BaseModel):
+    profesor: str = Field(..., description="Nombre del profesor")
+    asignatura: str = Field(..., description="Asignatura o materia")
+    curso: str = Field(..., description="Nombre/código del curso")
+    contexto: str = Field(..., description="Contexto del curso")
+    objetivos: list[str] = Field(..., description="Objetivos del curso")
+
+
+
 # ============================================================
 # Endpoints
 # ============================================================
@@ -230,6 +239,92 @@ async def get_course_context(course_id: str):
     if not result.get("found"):
         raise HTTPException(status_code=404, detail=result.get("error", "Curso no encontrado"))
     return result
+
+
+@app.post(
+    "/generate-workflow",
+    summary="Genera un plan de trabajo y abanico de temas para el módulo de profesores",
+)
+async def generate_workflow(request: GenerateWorkflowRequest):
+    """
+    Genera el plan de clases adaptado al módulo de profesores.
+    Mapea el resultado del generador de cursos detallado a la estructura simple del workflow.
+    """
+    logger.info(
+        "api.generate_workflow.request",
+        profesor=request.profesor,
+        asignatura=request.asignatura,
+        curso=request.curso,
+    )
+    
+    from mcp_server.tools.plan_generator import generate_course_plan
+    
+    # Preparamos una descripción combinada para el generador
+    description = (
+        f"Profesor: {request.profesor}\n"
+        f"Curso/Grupo: {request.curso}\n"
+        f"Contexto: {request.contexto}\n"
+        f"Objetivos:\n" + "\n".join(f"- {o}" for o in request.objetivos)
+    )
+    
+    try:
+        # Ejecutamos la generación usando el tool del MCP Server
+        # Usamos 1 mes (4 semanas) como duración estándar para el flujo de trabajo
+        result = generate_course_plan(
+            title=f"Plan para {request.curso} - {request.asignatura}",
+            subject=request.asignatura,
+            duration_months=1,
+            level="BEGINNER",
+            description=description,
+        )
+        
+        if not result.get("success"):
+            logger.error("api.generate_workflow.failed", error=result.get("error"))
+            raise HTTPException(
+                status_code=500,
+                detail=result.get("error", "Error interno al generar el plan de trabajo")
+            )
+            
+        plan_data = result["result"]
+        weeks = plan_data.get("weeks", [])
+        
+        # Mapeamos los tópicos de cada semana a la estructura plana de abanicoDeTemas
+        topics = []
+        for week in weeks:
+            for topic in week.get("topics", []):
+                # Mapeamos tipo de tópico a dificultad
+                t_type = topic.get("type", "teoria").lower()
+                if "practica" in t_type or "práctica" in t_type:
+                    diff = "INTERMEDIO"
+                elif "proyecto" in t_type:
+                    diff = "AVANZADO"
+                else:
+                    diff = "BASICO"
+                
+                topics.append({
+                    "titulo": topic.get("title", ""),
+                    "descripcion": topic.get("description", ""),
+                    "dificultad": diff
+                })
+                
+        # Las etapas son los títulos descriptivos de las semanas
+        etapas = [f"Semana {w.get('week_number')}: {w.get('title')}" for w in weeks]
+        
+        return {
+            "planResumen": plan_data.get("overview", f"Plan de estudio para {request.asignatura}"),
+            "planDuracionSemanas": len(weeks),
+            "planEtapas": etapas,
+            "topics": topics
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("api.generate_workflow.unexpected_error", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error inesperado al generar el plan: {str(e)}"
+        )
 
 
 # ============================================================
